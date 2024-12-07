@@ -27,10 +27,19 @@ class BudgetManager:
     
     def __init__(self, save_file: str = "budget_data.pkl"):
         self.accounts = {}
-        self.categories = ['Revenus', 'Maison', 'Alimentation', 'Transport', 'Sortie', 'Santé', 'NC']
+        self.categories = [
+            'Revenus',
+            'Maison',
+            'Alimentation',
+            'Transport',
+            'Sortie',
+            'Santé',
+            'NC',
+            'Interne']
         self.operations = pd.DataFrame(
-            columns=["date", "name", "account", "amount", "category", "Mensuel", "Interne"]
+            columns=["date", "name", "account", "amount", "category", "Mensuel"]
         )
+        self.operations
         self.save_file = save_file
 
     def add_account(self, account_name, account_num, account_balance=None):
@@ -44,7 +53,7 @@ class BudgetManager:
         self.accounts[account_name] = {'account_num':account_num,
                                        'account_balance':account_balance}
 
-    def add_operation(self, date, label, account, amount, category, monthly, internal):
+    def add_operation(self, date, label, account, amount, category, monthly):
         """
         add operation to DataFrame
         """
@@ -56,8 +65,7 @@ class BudgetManager:
             "account": account,
             "amount": amount,
             "category": category,
-            "Mensuel": monthly,
-            "Interne": internal,
+            "Mensuel": monthly
         }
         self.operations = pd.concat([self.operations, pd.DataFrame([new_op])], ignore_index=True)
         #self.operations.set_index('date', inplace=True)
@@ -113,11 +121,10 @@ class BudgetManager:
                     {
                         "date": df[DICTBANK[bank]['date']],
                         "name": df[DICTBANK[bank]['name']],
-                        "amount": df[DICTBANK[bank]['amount']],
                         "account": account_name,
+                        "amount": df[DICTBANK[bank]['amount']],
                         "Catégorie": "NC",
                         "Mensuel": False,
-                        "Interne": False,
                     }
                 )
                 break
@@ -133,7 +140,6 @@ class BudgetManager:
                         "account": account_name,
                         "Catégorie": "NC",
                         "Mensuel": False,
-                        "Interne": False,
                     }
                 )
             else:
@@ -262,7 +268,7 @@ class BudgetGUI:
         ttk.Button(frame, text="Save Data", command=self.save_data).grid(row=11, column=0, sticky=tk.EW, padx=5, pady=2)
 
         # Table des opérations
-        self.operations_table = ttk.Treeview(frame, columns=("date", "name", "account", "amount", "category", "Mensuel", "Interne"), show="headings", height=20)
+        self.operations_table = ttk.Treeview(frame, columns=("date", "name", "account", "amount", "category", "Mensuel"), show="headings", height=20)
         self.operations_table.grid(row=0, column=1, rowspan=12, sticky=tk.NSEW, padx=5, pady=5)
         for col in self.operations_table["columns"]:
             self.operations_table.heading(col, text=col)
@@ -357,7 +363,7 @@ class BudgetGUI:
             self.operations_table.delete(row)
 
         for idx, operation in filtered_operations.iterrows():
-            self.operations_table.insert("", "end", values=[idx] + operation.to_list())
+            self.operations_table.insert("", "end", values=operation.to_list())  # Utilise uniquement les colonnes
 
     def add_account(self):
         """
@@ -426,11 +432,10 @@ class BudgetGUI:
             amount = float(entry_amount.get())
             category = entry_category.get()
             monthly = bool(monthly_var.get())
-            internal = bool(internal_var.get())
 
             try:
                 # Add the operation
-                self.manager.add_operation(date, label, account, amount, category, monthly, internal)
+                self.manager.add_operation(date, label, account, amount, category, monthly)
 
                 # Update the account balance
                 self.manager.accounts[account]['account_balance'].loc[date] = (
@@ -468,9 +473,6 @@ class BudgetGUI:
 
         monthly_var = tk.IntVar()
         ttk.Checkbutton(add_window, text="Monthly", variable=monthly_var).grid(row=5, column=0, columnspan=2, padx=5, pady=5)
-
-        internal_var = tk.IntVar()
-        ttk.Checkbutton(add_window, text="Internal", variable=internal_var).grid(row=6, column=0, columnspan=2, padx=5, pady=5)
 
         ttk.Button(add_window, text="Add", command=save_operation).grid(row=7, column=0, columnspan=2, pady=10)
 
@@ -515,7 +517,6 @@ class BudgetGUI:
                 self.manager.operations.at[index, "amount"] = float(entry_amount.get())
                 self.manager.operations.at[index, "category"] = entry_category.get()
                 self.manager.operations.at[index, "Mensuel"] = bool(monthly_var.get())
-                self.manager.operations.at[index, "Interne"] = bool(internal_var.get())
 
                 self.update_operations_table()
                 edit_window.destroy()
@@ -549,9 +550,6 @@ class BudgetGUI:
 
         monthly_var = tk.IntVar(value=int(operation["Mensuel"]))
         ttk.Checkbutton(edit_window, text="Monthly", variable=monthly_var).grid(row=4, column=0, columnspan=2, padx=5, pady=5)
-
-        internal_var = tk.IntVar(value=int(operation["Interne"]))
-        ttk.Checkbutton(edit_window, text="Internal", variable=internal_var).grid(row=5, column=0, columnspan=2, padx=5, pady=5)
 
         ttk.Button(edit_window, text="Save", command=save_changes).grid(row=6, column=0, columnspan=2, pady=10)
 
