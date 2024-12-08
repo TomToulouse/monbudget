@@ -83,7 +83,7 @@ class BudgetManager:
         if file_extension.startswith("xls"):
             df = pd.read_excel(file_path, skiprows=self._detect_header_row(file_path))
         elif file_extension == "csv":
-            df = pd.read_csv(file_path, skiprows=self._detect_header_row(file_path),sep=';')
+            df = pd.read_csv(file_path, skiprows=self._detect_header_row(file_path))
         else:
             raise ValueError("Unsupported file type. Only Excel and CSV files are supported.")
 
@@ -119,11 +119,16 @@ class BudgetManager:
                 # Build operations DataFrame
                 newdf = pd.DataFrame(
                     {
-                        "date": df[DICTBANK[bank]['date']],
+                        "date": pd.to_datetime(df[DICTBANK[bank]['date']]),
                         "name": df[DICTBANK[bank]['name']],
                         "account": account_name,
-                        "amount": df[DICTBANK[bank]['amount']],
-                        "Catégorie": "NC",
+                        "amount": pd.to_numeric(
+                            df[DICTBANK[bank]['amount']]
+                            .replace(",", ".", regex=True)  # Remplace les virgules par des points
+                            .replace(r"\s", "", regex=True),  # Supprime les espaces éventuels
+                            errors="coerce"  # Ignore les erreurs si certaines valeurs sont invalides
+                        ),
+                        "category": "NC",
                         "Mensuel": False,
                     }
                 )
