@@ -83,7 +83,7 @@ class BudgetManager:
         if file_extension.startswith("xls"):
             df = pd.read_excel(file_path, skiprows=self._detect_header_row(file_path))
         elif file_extension == "csv":
-            df = pd.read_csv(file_path, skiprows=self._detect_header_row(file_path))
+            df = pd.read_csv(file_path, skiprows=self._detect_header_row(file_path),sep=';')
         else:
             raise ValueError("Unsupported file type. Only Excel and CSV files are supported.")
 
