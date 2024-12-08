@@ -486,17 +486,25 @@ class BudgetGUI:
         Deletes the selected operation from the table and the underlying data.
         """
         selected_item = self.operations_table.selection()
+        print(self.operations_table.item(selected_item))
         if not selected_item:
             messagebox.showerror("Error", "Please select an operation to delete.")
             return
 
         # Get index of the selected operation in the DataFrame
-        index = int(self.operations_table.item(selected_item)["values"][0])  # Assume first column is the DataFrame index
+        index = self.operations_table.item(selected_item)["values"][0]  # Assume first column is the DataFrame index
 
         # Confirm deletion
         confirm = messagebox.askyesno("Confirm Deletion", "Are you sure you want to delete this operation?")
         if confirm:
-            self.manager.operations.drop(index, inplace=True)
+            dfs = self.manager.operations
+            name = self.operations_table.item(selected_item)["values"][1]
+            account = self.operations_table.item(selected_item)["values"][2]
+            idx = dfs.index[
+                (dfs['date'] == pd.Timestamp(index)) & \
+                    (dfs['name'] == name) &\
+                        (dfs['account'] == account)].tolist()
+            self.manager.operations.drop(idx[0], inplace=True)
             self.manager.operations.reset_index(drop=True, inplace=True)
             self.update_operations_table()
             messagebox.showinfo("Success", "Operation deleted successfully.")
