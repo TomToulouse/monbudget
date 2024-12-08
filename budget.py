@@ -83,7 +83,7 @@ class BudgetManager:
         if file_extension.startswith("xls"):
             df = pd.read_excel(file_path, skiprows=self._detect_header_row(file_path))
         elif file_extension == "csv":
-            df = pd.read_csv(file_path, skiprows=self._detect_header_row(file_path))
+            df = pd.read_csv(file_path, skiprows=self._detect_header_row(file_path),sep=';')
         else:
             raise ValueError("Unsupported file type. Only Excel and CSV files are supported.")
 
@@ -205,6 +205,44 @@ class BudgetManager:
 
         return 0  # Default to the first row if no header is found
 
+    def add_virtual_operation(self, from_category, to_category, amount, date=None):
+        """
+        Transfers money virtually from one category to another.
+        """
+        if from_category not in self.categories or to_category not in self.categories:
+            raise ValueError("Invalid category provided.")
+        if from_category == "Revenus" and amount > self.get_category_balance(from_category):
+            raise ValueError("Insufficient funds in 'Revenus' category.")
+        
+        date = date or pd.Timestamp.now()
+
+        # Create two operations: one debit and one credit
+        debit_op = {
+            "date": date,
+            "name": f"Transfer to {to_category}",
+            "account": "Virtual",
+            "amount": -amount,
+            "category": from_category,
+            "Mensuel": False,
+        }
+        credit_op = {
+            "date": date,
+            "name": f"Transfer from {from_category}",
+            "account": "Virtual",
+            "amount": amount,
+            "category": to_category,
+            "Mensuel": False,
+        }
+
+        self.operations = pd.concat([self.operations, pd.DataFrame([debit_op, credit_op])], ignore_index=True)
+
+    def get_category_balance(self, category):
+        """
+        Calculates the total balance for a given category.
+        """
+        return self.operations[self.operations["category"] == category]["amount"].sum()
+
+
 class BudgetGUI:
     """
     GUI for the budget management system. Allows users to manage accounts and operations via a graphical interface.
@@ -239,56 +277,79 @@ class BudgetGUI:
         add_account_button.bind("<Leave>", lambda e: self.hide_tooltip())
 
         self.accounts_listbox = tk.Listbox(frame, height=6, width=40)
-        self.accounts_listbox.grid(row=1, column=0, rowspan=1, sticky=tk.NSEW, padx=5, pady=5)
+        self.accounts_listbox.grid(row=1, column=0, sticky=tk.NSEW, padx=5, pady=5)
 
         # Menus déroulants pour année et mois
-        ttk.Label(frame, text="Year:").grid(row=2, column=0, padx=5, pady=5)
+        ttk.Label(frame, text="Year:").grid(row=4, column=0, padx=5, pady=5)
         self.year_var = tk.StringVar(value="All")
         self.year_menu = ttk.Combobox(frame, textvariable=self.year_var, state="readonly")
-        self.year_menu.grid(row=3, column=0, padx=5, pady=5)
+        self.year_menu.grid(row=5, column=0, padx=5, pady=5)
         self.year_menu.bind("<<ComboboxSelected>>", self.update_month_menu)
 
-        ttk.Label(frame, text="Month:").grid(row=4, column=0, padx=5, pady=5)
+        ttk.Label(frame, text="Month:").grid(row=6, column=0, padx=5, pady=5)
         self.month_var = tk.StringVar(value="All")
         self.month_menu = ttk.Combobox(frame, textvariable=self.month_var, state="readonly")
-        self.month_menu.grid(row=5, column=0, padx=5, pady=5)
+        self.month_menu.grid(row=7, column=0, padx=5, pady=5)
         self.month_menu.bind("<<ComboboxSelected>>", self.update_operations_table)
 
         # Boutons de gestion des opérations
-        ttk.Button(frame, text="Add Operation", command=self.add_operation).grid(row=6, column=0, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Import Operations", command=self.handle_import_operations).grid(row=7, column=0, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Categorize Operations", command=self.categorize_operations).grid(row=8, column=0, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Add Category", command=self.add_category).grid(row=9, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Add Operation", command=self.add_operation).grid(row=8, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Import Operations", command=self.handle_import_operations).grid(row=9, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Categorize Operations", command=self.categorize_operations).grid(row=10, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Add Category", command=self.add_category).grid(row=11, column=0, sticky=tk.EW, padx=5, pady=2)
+
         # Boutons Modifier et Supprimer sous la table des opérations
-        ttk.Button(frame, text="Edit Operation", command=self.edit_operation).grid(row=12, column=1, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Delete Operation", command=self.delete_operation).grid(row=13, column=1, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Edit Operation", command=self.edit_operation).grid(row=13, column=1, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Delete Operation", command=self.delete_operation).grid(row=13, column=2, sticky=tk.EW, padx=5, pady=2)
 
         # Menu des visualisations
         visualize_frame = ttk.LabelFrame(frame, text="Visualize")
-        visualize_frame.grid(row=10, column=0, sticky=tk.EW, padx=5, pady=5)
+        visualize_frame.grid(row=12, column=0, sticky=tk.EW, padx=5, pady=5)
         ttk.Button(visualize_frame, text="Account Balances", command=self.visualize_account_balances).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(visualize_frame, text="Spending by Category", command=self.visualize_category_spending).pack(fill=tk.X, padx=5, pady=2)
 
         # Bouton de sauvegarde des données
-        ttk.Button(frame, text="Save Data", command=self.save_data).grid(row=11, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Save Data", command=self.save_data).grid(row=13, column=0, sticky=tk.EW, padx=5, pady=2)
 
         # Table des opérations
-        self.operations_table = ttk.Treeview(frame, columns=("date", "name", "account", "amount", "category", "Mensuel"), show="headings", height=20)
-        self.operations_table.grid(row=0, column=1, rowspan=12, sticky=tk.NSEW, padx=5, pady=5)
+        self.operations_table = ttk.Treeview(
+            frame,
+            columns=("date", "name", "account", "amount", "category", "Mensuel"),
+            show="headings",
+            height=20
+        )
+        self.operations_table.grid(row=0, column=1, rowspan=10, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
         for col in self.operations_table["columns"]:
             self.operations_table.heading(col, text=col)
+            
+        # Tableau des catégories
+        ttk.Label(frame, text="Category Summary:").grid(row=10, column=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        self.category_summary_table = ttk.Treeview(
+            frame,
+            columns=self.manager.categories,
+            show="headings",
+            height=3
+        )
+        self.category_summary_table.grid(row=11, column=1, rowspan=3, sticky=tk.NSEW, padx=5, pady=5)
+        for category in self.manager.categories:
+            self.category_summary_table.heading(category, text=category)
+
+
         # Configuration de la disposition
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
         # Initialisation des données
         self.update_all()
+
         
     def update_all(self):
         self.update_accounts_list()
         self.update_year_menu()
         self.update_month_menu()
-        self.update_operations_table()#can be removed
+        self.update_accounts_list()
+        self.update_operations_table()
+        self.update_category_summary()
 
     def update_year_menu(self):
         """
@@ -566,7 +627,6 @@ class BudgetGUI:
 
         ttk.Button(edit_window, text="Save", command=save_changes).grid(row=6, column=0, columnspan=2, pady=10)
 
-
     def categorize_operations(self):
         """
         Opens a dialog to assign categories to operations that are not categorized or are categorized as 'NC'.
@@ -627,6 +687,7 @@ class BudgetGUI:
             "SANTE": "Santé",
             "RESTO": "Sortie",
             "ESL": "Maison",
+            "ECHEANCE PRET": "Maison",
         }
 
         op_index = [0]  # Track current operation index
@@ -788,7 +849,6 @@ class BudgetGUI:
         self.root.wait_window(mapping_window)
         return mapping_result if mapping_result else None
 
-
     def handle_unrecognized_account(self, nbaccount, accdf):
         """
         Handles the case where the account number from the import file is not recognized.
@@ -797,10 +857,19 @@ class BudgetGUI:
         - Create a new account
         - Cancel the import
         """
+        def clear_buttons():
+            """
+            Clears the initial action buttons.
+            """
+            btn_associate.grid_remove()
+            btn_create_new.grid_remove()
+            btn_cancel.grid_remove()
+            
         def associate_with_existing_account():
             """
             Opens a dialog to let the user select an existing account.
             """
+            clear_buttons()
             def select_account():
                 selected_account = account_var.get()
                 if selected_account:
@@ -818,6 +887,8 @@ class BudgetGUI:
             """
             Opens a dialog to let the user create a new account.
             """
+            clear_buttons()
+            
             def save_new_account():
                 new_account_name = entry_name.get()
                 if new_account_name:
@@ -847,16 +918,19 @@ class BudgetGUI:
         
         # Buttons for actions
         if self.manager.accounts.keys():
-            ttk.Button(dialog, text="Associate with Existing Account",
-                   command=associate_with_existing_account).grid(row=3, column=0, padx=10, pady=10)
+            btn_associate = ttk.Button(dialog, text="Associate with Existing Account",
+                   command=associate_with_existing_account)
+            btn_associate.grid(row=3, column=0, padx=10, pady=10)
             rowcancel = 4
         else:
             rowcancel = 3
         
-        ttk.Button(dialog, text="Create New Account",
-                   command=create_new_account).grid(row=3, column=3, padx=10, pady=10)
-        ttk.Button(dialog, text="Cancel Import",
-                   command=cancel_import).grid(row=rowcancel, column=0, columnspan=2, pady=10)
+        btn_create_new = ttk.Button(dialog, text="Create New Account",
+                   command=create_new_account)
+        btn_create_new.grid(row=3, column=3, padx=10, pady=10)
+        btn_cancel = ttk.Button(dialog, text="Cancel Import",
+                   command=cancel_import)
+        btn_cancel.grid(row=rowcancel, column=0, columnspan=2, pady=10)
 
         # Store the result and wait for user interaction
         result = {"choice": None, "account_name": None}
