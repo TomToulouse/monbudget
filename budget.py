@@ -862,6 +862,73 @@ class BudgetGUI:
         else:
             raise ValueError("Unexpected error in account selection.")
 
+    def open_virtual_operation_window(self):
+        """
+        Opens a window to create a virtual operation.
+        """
+        window = tk.Toplevel(self.root)
+        window.title("Virtual Operation")
+
+        tk.Label(window, text="From Category:").grid(row=0, column=0)
+        from_category_var = tk.StringVar(value=self.manager.categories[0])
+        from_category_menu = ttk.Combobox(window, textvariable=from_category_var, values=self.manager.categories)
+        from_category_menu.grid(row=0, column=1)
+
+        tk.Label(window, text="To Category:").grid(row=1, column=0)
+        to_category_var = tk.StringVar(value=self.manager.categories[1])
+        to_category_menu = ttk.Combobox(window, textvariable=to_category_var, values=self.manager.categories)
+        to_category_menu.grid(row=1, column=1)
+
+        tk.Label(window, text="Amount:").grid(row=2, column=0)
+        amount_var = tk.DoubleVar()
+        tk.Entry(window, textvariable=amount_var).grid(row=2, column=1)
+
+        def add_virtual_op():
+            try:
+                self.manager.add_virtual_operation(from_category_var.get(), to_category_var.get(), amount_var.get())
+                self.update_all()
+                window.destroy()
+            except ValueError as e:
+                tk.messagebox.showerror("Error", str(e))
+
+        tk.Button(window, text="Add", command=add_virtual_op).grid(row=3, column=0, columnspan=2)
+
+    def update_category_balances(self):
+        """
+        Updates the display showing the balance of each category.
+        """
+        for widget in self.category_balance_frame.winfo_children():
+            widget.destroy()
+
+        for category in self.manager.categories:
+            balance = self.manager.get_category_balance(category)
+            tk.Label(self.category_balance_frame, text=f"{category}: {balance:.2f}€").pack(anchor="w")
+
+    def update_category_summary(self):
+        """
+        Updates the category summary table with real, virtual, and total balances.
+        """
+        # Filtrer les opérations en fonction de l'année et du mois sélectionnés
+        selected_year = self.year_var.get()
+        selected_month = self.month_var.get()
+
+        filtered_operations = self.manager.operations
+        if selected_year != "All":
+            filtered_operations = filtered_operations[filtered_operations["date"].dt.year == int(selected_year)]
+            if selected_month != "All":
+                filtered_operations = filtered_operations[filtered_operations["date"].dt.month == int(selected_month)]
+
+        # Calculer les soldes par catégorie
+        real_balances = filtered_operations[filtered_operations["account"] != "Virtual"].groupby("category")["amount"].sum()
+        virtual_balances = filtered_operations[filtered_operations["account"] == "Virtual"].groupby("category")["amount"].sum()
+        total_balances = self.manager.operations.groupby("category")["amount"].sum()
+
+        # Insérer les lignes dans le tableau
+        self.category_summary_table.delete(*self.category_summary_table.get_children())  # Clear existing rows
+        self.category_summary_table.insert("", "end", values=[real_balances.get(cat, 0) for cat in self.manager.categories])
+        self.category_summary_table.insert("", "end", values=[virtual_balances.get(cat, 0) for cat in self.manager.categories])
+        self.category_summary_table.insert("", "end", values=[total_balances.get(cat, 0) for cat in self.manager.categories])
+
 
 if __name__ == "__main__":
     try:
