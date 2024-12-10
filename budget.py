@@ -299,8 +299,8 @@ class BudgetGUI:
         ttk.Button(frame, text="Add Category", command=self.add_category).grid(row=11, column=0, sticky=tk.EW, padx=5, pady=2)
 
         # Boutons Modifier et Supprimer sous la table des opérations
-        ttk.Button(frame, text="Edit Operation", command=self.edit_operation).grid(row=13, column=1, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Delete Operation", command=self.delete_operation).grid(row=13, column=2, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Edit Operation", command=self.edit_operation).grid(row=8, column=1, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Delete Operation", command=self.delete_operation).grid(row=8, column=2, sticky=tk.EW, padx=5, pady=2)
 
         # Menu des visualisations
         visualize_frame = ttk.LabelFrame(frame, text="Visualize")
@@ -318,19 +318,20 @@ class BudgetGUI:
             show="headings",
             height=20
         )
-        self.operations_table.grid(row=0, column=1, rowspan=10, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
+        self.operations_table.grid(row=0, column=1, rowspan=8, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
         for col in self.operations_table["columns"]:
             self.operations_table.heading(col, text=col)
-            
+        
+
         # Tableau des catégories
-        ttk.Label(frame, text="Category Summary:").grid(row=10, column=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(frame, text="Category Summary:").grid(row=11, column=1, rowspan=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
         self.category_summary_table = ttk.Treeview(
             frame,
             columns=self.manager.categories,
             show="headings",
-            height=3
+            height=2
         )
-        self.category_summary_table.grid(row=11, column=1, rowspan=3, sticky=tk.NSEW, padx=5, pady=5)
+        self.category_summary_table.grid(row=12, column=1, rowspan=2, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
         for category in self.manager.categories:
             self.category_summary_table.heading(category, text=category)
 
@@ -342,7 +343,6 @@ class BudgetGUI:
         # Initialisation des données
         self.update_all()
 
-        
     def update_all(self):
         self.update_accounts_list()
         self.update_year_menu()
@@ -473,7 +473,6 @@ class BudgetGUI:
             new_category = entry_category.get()
             if new_category and new_category not in self.manager.categories:
                 self.manager.categories.append(new_category)
-                messagebox.showinfo("Success", f"Category '{new_category}' added.")
                 add_window.destroy()
             else:
                 messagebox.showerror("Error", "Category already exists or is invalid.")
@@ -486,6 +485,7 @@ class BudgetGUI:
         entry_category.grid(row=0, column=1, padx=5, pady=5)
 
         ttk.Button(add_window, text="Add", command=save_category).grid(row=1, column=0, columnspan=2, pady=10)
+        return add_window
 
     def add_operation(self):
         """
@@ -496,7 +496,7 @@ class BudgetGUI:
             label = entry_label.get()
             account = account_var.get()
             amount = float(entry_amount.get())
-            category = entry_category.get()
+            category = category_var.get()
             monthly = bool(monthly_var.get())
 
             try:
@@ -505,7 +505,7 @@ class BudgetGUI:
 
                 # Update the account balance
                 self.manager.accounts[account]['account_balance'].loc[date] = (
-                    self.manager.accounts[account]['account_balance'].iloc[-1, 0] + amount
+                    self.manager.accounts[account]['account_balance'].iloc[-1, 1] + amount
                 )
 
                 self.update_operations_table()
@@ -533,8 +533,9 @@ class BudgetGUI:
         entry_amount = ttk.Entry(add_window)
         entry_amount.grid(row=3, column=1, padx=5, pady=5)
 
+        category_var = tk.StringVar()
         ttk.Label(add_window, text="Category:").grid(row=4, column=0, padx=5, pady=5)
-        entry_category = ttk.Entry(add_window)
+        entry_category = ttk.OptionMenu(add_window, category_var, *self.manager.categories)
         entry_category.grid(row=4, column=1, padx=5, pady=5)
 
         monthly_var = tk.IntVar()
@@ -660,12 +661,30 @@ class BudgetGUI:
                     break
             category_var.set(default_category)
             
-        def add_category_in_catop(obj):
-            obj.add_category()
-            lastcat = obj.categories[-1]
-            category_var.set(lastcat)
-            category_menu['menu'].add_command(label=lastcat, command=tk._setit(category_var, lastcat))
+        def add_category_in_catop():
+            """
+            Opens the Add Category dialog and updates the category menu in the Categorize Operations window.
+            """
+            old_last = self.manager.categories[-1]
             
+            #global category_menu
+            category_window= self.add_category()  # Ajoute une nouvelle catégorie via la fonction existante
+            if category_window:
+                self.root.wait_window(category_window) 
+
+            new_category = self.manager.categories[-1]  # Récupère la dernière catégorie ajoutée
+            if old_last == new_category:
+                return
+            category_var.set(new_category)  # Définit la nouvelle catégorie comme sélectionnée
+
+            # menu.add_command(label="Test Category", command=lambda: category_var.set("Test Category"))
+            
+            menu = category_menu["menu"]
+            # self.category_menu = tk.OptionMenu(categorize_window, category_var, *self.manager.categories)
+            # self.category_menu.grid(row=1, column=1, padx=5, pady=5)
+            # Met à jour le menu des catégories
+            # menu = category_menu["menu"]  # Accède au menu sous-jacent
+            menu.add_command(label=new_category, command=lambda value=new_category: category_var.set(value))
 
         # Filter non-categorized operations
         non_categorized_indices = self.manager.operations[
@@ -699,13 +718,14 @@ class BudgetGUI:
         label_operation = ttk.Label(categorize_window, text="", font=("Arial", 12), wraplength=400)
         label_operation.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
 
-        category_var = tk.StringVar()
+        category_var = tk.StringVar(value=self.manager.categories[0] if self.manager.categories else "")
         ttk.Label(categorize_window, text="Category:").grid(row=1, column=0, padx=10, pady=5)
-        category_menu = ttk.OptionMenu(categorize_window, category_var, *self.manager.categories)
+        category_menu = tk.OptionMenu(categorize_window, category_var, *self.manager.categories)
+        #categorize_window.configure(category_menu)
         category_menu.grid(row=1, column=1, padx=5, pady=5)
 
         ttk.Button(categorize_window, text="Next", command=save_and_next).grid(row=2, column=0, columnspan=2, pady=10)
-        ttk.Button(categorize_window, text="Add Category", command=self.add_category).grid(row=3, column=0,columnspan=2, pady=10)
+        ttk.Button(categorize_window, text="Add Category", command=add_category_in_catop).grid(row=3, column=0,columnspan=2, pady=10)
 
         # Show the first operation
         show_operation(0)
