@@ -70,6 +70,33 @@ class BudgetManager:
         self.operations = pd.concat([self.operations, pd.DataFrame([new_op])], ignore_index=True)
         #self.operations.set_index('date', inplace=True)
 
+    def add_virtual_operation(self, from_category, to_category, amount, date):
+        """
+        Adds two virtual operations: one debiting 'from_category' and one crediting 'to_category'.
+        """
+        if from_category not in self.categories or to_category not in self.categories:
+            raise ValueError("Invalid category provided.")
+
+        # Ajouter les opérations virtuelles
+        debit_op = {
+            "date": date,
+            "name": f"Transfer to {to_category}",
+            "account": "Virtual",
+            "amount": -amount,
+            "category": from_category,
+            "Mensuel": False,
+        }
+        credit_op = {
+            "date": date,
+            "name": f"Transfer from {from_category}",
+            "account": "Virtual",
+            "amount": amount,
+            "category": to_category,
+            "Mensuel": False,
+        }
+
+        self.operations = pd.concat([self.operations, pd.DataFrame([debit_op, credit_op])], ignore_index=True)
+
     def import_operations_from_excel(self, file_path, gui_instance, mapping=None):
         """
         Import operations from an Excel or CSV file and assign them to the correct account.
@@ -95,6 +122,7 @@ class BudgetManager:
                 if bank == 'BoursoBank':
                     nbaccount = df['accountNum'][0]
                     accdf = pd.DataFrame({"date": df['dateOp'], "balance": df['accountbalance']})
+
                 elif bank == 'BNP':
                     firstline = pd.read_excel(file_path, header=None, nrows=1)
                     nbaccount = firstline.values[0, 2]
@@ -105,10 +133,26 @@ class BudgetManager:
                     if nbaccount == self.accounts[account]["account_num"]:
                         account_name = account
                         break
-
+                df[DICTBANK[bank]['amount']] =  pd.to_numeric(
+                            df[DICTBANK[bank]['amount']].replace(",", ".", regex=True)
+                            .replace(r"\s", "", regex=True), errors="coerce")
                 # If account is not found
                 if account_name is None:
                     account_name = gui_instance.handle_unrecognized_account(nbaccount, accdf)
+                    lastbalance = accdf['balance'].iloc[-1]
+                    initialbalance = lastbalance - df[DICTBANK[bank]['amount']].sum()
+                    initialop = pd.DataFrame({
+                        "date": pd.to_datetime(df[DICTBANK[bank]['date']][0]),
+                        "name": df[DICTBANK[bank]['name']][0],
+                        "account": account_name,
+                        "amount": initialbalance,
+                        "category": self.categories[0],
+                        "Mensuel": False,
+                    })
+                    if self.operations.empty:
+                        self.operations = initialop
+                    else:
+                        self.operations = pd.concat([self.operations, initialop], ignore_index=True)
                     gui_instance.update_all()
 
                 # Update account balance
@@ -122,12 +166,7 @@ class BudgetManager:
                         "date": pd.to_datetime(df[DICTBANK[bank]['date']]),
                         "name": df[DICTBANK[bank]['name']],
                         "account": account_name,
-                        "amount": pd.to_numeric(
-                            df[DICTBANK[bank]['amount']]
-                            .replace(",", ".", regex=True)  # Remplace les virgules par des points
-                            .replace(r"\s", "", regex=True),  # Supprime les espaces éventuels
-                            errors="coerce"  # Ignore les erreurs si certaines valeurs sont invalides
-                        ),
+                        "amount": df[DICTBANK[bank]['amount']],
                         "category": "NC",
                         "Mensuel": False,
                     }
@@ -293,15 +332,19 @@ class BudgetGUI:
         self.month_menu.bind("<<ComboboxSelected>>", self.update_operations_table)
 
         # Boutons de gestion des opérations
-        ttk.Button(frame, text="Add Operation", command=self.add_operation).grid(row=8, column=0, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Import Operations", command=self.handle_import_operations).grid(row=9, column=0, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Categorize Operations", command=self.categorize_operations).grid(row=10, column=0, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Add Category", command=self.add_category).grid(row=11, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Add Category", command=self.add_category).grid(row=8, column=0, sticky=tk.EW, padx=5, pady=2)
+
+        # Menu pour éditer des opérations réelles
+        real_ops_frame = ttk.LabelFrame(frame, text="Operations")
+        real_ops_frame.grid(row=8, column=1, sticky=tk.EW, padx=5, pady=5)
 
         # Boutons Modifier et Supprimer sous la table des opérations
-        ttk.Button(frame, text="Edit Operation", command=self.edit_operation).grid(row=8, column=1, sticky=tk.EW, padx=5, pady=2)
-        ttk.Button(frame, text="Delete Operation", command=self.delete_operation).grid(row=8, column=2, sticky=tk.EW, padx=5, pady=2)
-
+        ttk.Button(real_ops_frame, text="Add Operation", command=self.add_operation).grid(row=0, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(real_ops_frame, text="Edit Operation", command=self.edit_operation).grid(row=0, column=1, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(real_ops_frame, text="Delete Operation", command=self.delete_operation).grid(row=0, column=2, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(real_ops_frame, text="Import Operations", command=self.handle_import_operations).grid(row=1, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(real_ops_frame, text="Categorize Operations", command=self.categorize_operations).grid(row=1, column=1, sticky=tk.EW, padx=5, pady=2)
+        
         # Menu des visualisations
         visualize_frame = ttk.LabelFrame(frame, text="Visualize")
         visualize_frame.grid(row=12, column=0, sticky=tk.EW, padx=5, pady=5)
@@ -309,7 +352,7 @@ class BudgetGUI:
         ttk.Button(visualize_frame, text="Spending by Category", command=self.visualize_category_spending).pack(fill=tk.X, padx=5, pady=2)
 
         # Bouton de sauvegarde des données
-        ttk.Button(frame, text="Save Data", command=self.save_data).grid(row=13, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Button(frame, text="Save Data", command=self.save_data).grid(row=10, column=0, sticky=tk.EW, padx=5, pady=2)
 
         # Table des opérations
         self.operations_table = ttk.Treeview(
@@ -318,20 +361,53 @@ class BudgetGUI:
             show="headings",
             height=20
         )
-        self.operations_table.grid(row=0, column=1, rowspan=8, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
+        self.operations_table.grid(row=0, column=1, rowspan=8, sticky=tk.NSEW, padx=5, pady=5)
         for col in self.operations_table["columns"]:
             self.operations_table.heading(col, text=col)
         
+        # Menu pour ajouter des opérations virtuelles
+        virtual_ops_frame = ttk.LabelFrame(frame, text="Add Virtual Operation")
+        virtual_ops_frame.grid(row=9, column=1, rowspan=2, sticky=tk.EW, padx=5, pady=5)
 
+        # Champ "From" (catégorie source)
+        ttk.Label(virtual_ops_frame, text="From:").grid(row=0, column=0, padx=5, pady=5)
+        self.from_var = tk.StringVar(value=self.manager.categories[0])
+        self.from_menu = ttk.OptionMenu(virtual_ops_frame, self.from_var, *self.manager.categories)
+        self.from_menu.grid(row=0, column=1, padx=5, pady=5)
+
+        # Champ "To" (catégorie cible)
+        ttk.Label(virtual_ops_frame, text="To:").grid(row=0, column=2, padx=5, pady=5)
+        self.to_var = tk.StringVar(value=self.manager.categories[0])
+        self.to_menu = ttk.OptionMenu(virtual_ops_frame, self.to_var, *self.manager.categories)
+        self.to_menu.grid(row=0, column=3, padx=5, pady=5)
+
+        # Champ "Amount"
+        ttk.Label(virtual_ops_frame, text="Amount:").grid(row=1, column=0, padx=5, pady=5)
+        self.amount_var = tk.StringVar()
+        ttk.Entry(virtual_ops_frame, textvariable=self.amount_var).grid(row=1, column=1, padx=5, pady=5)
+
+        # Champ "Date"
+        ttk.Label(virtual_ops_frame, text="Date:").grid(row=1, column=2, padx=5, pady=5)
+        default_date = self.manager.operations["date"].max() if not self.manager.operations.empty else pd.Timestamp.now()
+        date_var = tk.StringVar(value=default_date.strftime("%Y-%m-%d"))
+        ttk.Entry(virtual_ops_frame, textvariable=date_var).grid(row=1, column=3, padx=5, pady=5)
+
+        # Bouton "Add Virtual Operation"
+        ttk.Button(
+            virtual_ops_frame,
+            text="Add Virtual Operation",
+            command=lambda: self.add_virtual_operation(self.from_var.get(), self.to_var.get(), self.amount_var.get(), date_var.get())
+        ).grid(row=2, column=0, columnspan=4, pady=10)
+        
         # Tableau des catégories
-        ttk.Label(frame, text="Category Summary:").grid(row=11, column=1, rowspan=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(frame, text="Category Summary:").grid(row=11, column=1, rowspan=2, padx=5, pady=5, sticky=tk.W)
         self.category_summary_table = ttk.Treeview(
             frame,
             columns=self.manager.categories,
             show="headings",
             height=2
         )
-        self.category_summary_table.grid(row=12, column=1, rowspan=2, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
+        self.category_summary_table.grid(row=12, column=1, rowspan=1, sticky=tk.NSEW, padx=5, pady=5)
         for category in self.manager.categories:
             self.category_summary_table.heading(category, text=category)
 
@@ -349,7 +425,7 @@ class BudgetGUI:
         self.update_month_menu()
         self.update_accounts_list()
         self.update_operations_table()
-        self.update_category_summary()
+        self.update_category_summary_table()
 
     def update_year_menu(self):
         """
@@ -378,6 +454,19 @@ class BudgetGUI:
         self.month_menu["values"] = ["All"] + months
         self.month_var.set("All")
         self.update_operations_table()
+
+    def update_category_summary_table(self):
+        """
+        Updates the category summary table columns and data to include all categories.
+        """
+        # Mettre à jour les colonnes de la table
+        self.category_summary_table["columns"] = self.manager.categories
+        for col in self.category_summary_table["columns"]:
+            self.category_summary_table.heading(col, text=col)
+
+        # Réactualiser les données de la table
+        self.update_category_summary()
+
 
     def show_tooltip(self, widget, text):
         """
@@ -473,6 +562,9 @@ class BudgetGUI:
             new_category = entry_category.get()
             if new_category and new_category not in self.manager.categories:
                 self.manager.categories.append(new_category)
+                self.from_menu["menu"].add_command(label=new_category, command=lambda value=new_category: self.from_var.set(value))
+                self.to_menu["menu"].add_command(label=new_category, command=lambda value=new_category: self.to_var.set(value))
+                self.update_all()
                 add_window.destroy()
             else:
                 messagebox.showerror("Error", "Category already exists or is invalid.")
@@ -639,11 +731,12 @@ class BudgetGUI:
             self.manager.operations.at[current_index, "category"] = selected_category
             # Move to the next operation
             op_index[0] += 1
+            self.update_operations_table()
+            self.update_category_summary()
             if op_index[0] < len(non_categorized_indices):
                 show_operation(op_index[0])
             else:
                 messagebox.showinfo("Success", "All operations have been categorized.")
-                self.update_operations_table()
                 categorize_window.destroy()
 
         def show_operation(index):
@@ -676,16 +769,11 @@ class BudgetGUI:
             if old_last == new_category:
                 return
             category_var.set(new_category)  # Définit la nouvelle catégorie comme sélectionnée
-
-            # menu.add_command(label="Test Category", command=lambda: category_var.set("Test Category"))
+            self.from_menu["menu"].add_command(label=new_category, command=lambda value=new_category: self.from_var.set(value))
+            self.to_menu["menu"].add_command(label=new_category, command=lambda value=new_category: self.to_var.set(value))
+            category_menu["menu"].add_command(label=new_category, command=lambda value=new_category: category_var.set(value))
+            self.update_all()
             
-            menu = category_menu["menu"]
-            # self.category_menu = tk.OptionMenu(categorize_window, category_var, *self.manager.categories)
-            # self.category_menu.grid(row=1, column=1, padx=5, pady=5)
-            # Met à jour le menu des catégories
-            # menu = category_menu["menu"]  # Accède au menu sous-jacent
-            menu.add_command(label=new_category, command=lambda value=new_category: category_var.set(value))
-
         # Filter non-categorized operations
         non_categorized_indices = self.manager.operations[
             (self.manager.operations["category"] == "NC") | (self.manager.operations["category"].isnull())
@@ -964,37 +1052,6 @@ class BudgetGUI:
         else:
             raise ValueError("Unexpected error in account selection.")
 
-    def open_virtual_operation_window(self):
-        """
-        Opens a window to create a virtual operation.
-        """
-        window = tk.Toplevel(self.root)
-        window.title("Virtual Operation")
-
-        tk.Label(window, text="From Category:").grid(row=0, column=0)
-        from_category_var = tk.StringVar(value=self.manager.categories[0])
-        from_category_menu = ttk.Combobox(window, textvariable=from_category_var, values=self.manager.categories)
-        from_category_menu.grid(row=0, column=1)
-
-        tk.Label(window, text="To Category:").grid(row=1, column=0)
-        to_category_var = tk.StringVar(value=self.manager.categories[1])
-        to_category_menu = ttk.Combobox(window, textvariable=to_category_var, values=self.manager.categories)
-        to_category_menu.grid(row=1, column=1)
-
-        tk.Label(window, text="Amount:").grid(row=2, column=0)
-        amount_var = tk.DoubleVar()
-        tk.Entry(window, textvariable=amount_var).grid(row=2, column=1)
-
-        def add_virtual_op():
-            try:
-                self.manager.add_virtual_operation(from_category_var.get(), to_category_var.get(), amount_var.get())
-                self.update_all()
-                window.destroy()
-            except ValueError as e:
-                tk.messagebox.showerror("Error", str(e))
-
-        tk.Button(window, text="Add", command=add_virtual_op).grid(row=3, column=0, columnspan=2)
-
     def update_category_balances(self):
         """
         Updates the display showing the balance of each category.
@@ -1030,6 +1087,41 @@ class BudgetGUI:
         self.category_summary_table.insert("", "end", values=[real_balances.get(cat, 0) for cat in self.manager.categories])
         self.category_summary_table.insert("", "end", values=[virtual_balances.get(cat, 0) for cat in self.manager.categories])
         self.category_summary_table.insert("", "end", values=[total_balances.get(cat, 0) for cat in self.manager.categories])
+
+    def add_virtual_operation(self, from_category, to_category, amount, date):
+        """
+        Adds a virtual operation transferring money from one category to another.
+        """
+        try:
+            # Vérifier que le montant est un nombre valide
+            amount = float(amount)
+            if amount <= 0:
+                raise ValueError("Amount must be positive.")
+        except ValueError:
+            messagebox.showerror("Error", "Invalid amount. Please enter a positive number.")
+            return
+
+        # Vérifier que la date est valide
+        try:
+            date = pd.to_datetime(date)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date. Please use the format YYYY-MM-DD.")
+            return
+
+        # Vérifier que les catégories sont différentes
+        if from_category == to_category:
+            messagebox.showerror("Error", "The source and target categories must be different.")
+            return
+
+        # Ajouter les opérations virtuelles dans le gestionnaire
+        self.manager.add_virtual_operation(from_category, to_category, amount, date)
+
+        # Réinitialiser les champs
+        self.amount_var.set("")
+
+        # Mettre à jour les affichages
+        self.update_all()
+        messagebox.showinfo("Success", "Virtual operation added successfully.")
 
 
 if __name__ == "__main__":
