@@ -13,6 +13,11 @@ DICTBANK = {
         "name": "Libelle operation",
         "amount": "Montant operation en euro",
     },
+    "BNP2": {
+        "date": "Date operation",
+        "name": "Libelle operation",
+        "amount": "Montant operation",
+    },
     "BoursoBank": {"date": "dateOp", "name": "label", "amount": "amount"},
 }
 
@@ -157,46 +162,53 @@ class BudgetManager:
         newdf = None
         account_name = None
         nbaccount= None
-        for bank in DICTBANK:
-            if DICTBANK[bank]["date"] in df:
+        accdf = None
+        for bank, catnames in DICTBANK.items():
+            if catnames["amount"] in df:
                 if bank == "BoursoBank":
                     nbaccount = df["accountNum"][0]
                     accdf = pd.DataFrame(
                         {"date": df["dateOp"], "balance": df["accountbalance"]}
                     )
+                    df[catnames["date"]] = pd.to_datetime(
+                        df[catnames["date"]])
 
-                elif bank == "BNP":
+                elif bank.startswith("BNP"):
                     firstline = pd.read_excel(file_path, header=None, nrows=1)
                     nbaccount = firstline.values[0, 2]
+                    idxbal = 5
+                    if bank == "BNP2":
+                        idxbal = 2
                     accdf = pd.DataFrame(
                         {
-                            "date": [df[DICTBANK[bank]["date"]].iloc[-1]],
-                            "balance": [firstline.values[0, 5]],
+                            "date": [df[catnames["date"]].iloc[-1]],
+                            "balance": [firstline.values[0, idxbal]],
                         }
                     )
+                    df[catnames["date"]] = pd.to_datetime(
+                        df[catnames["date"]],format="%d-%m-%Y")
 
                 # Check if account number exists
-                for account in self.accounts:
-                    if nbaccount == self.accounts[account]["account_num"]:
-                        account_name = account
+                for acname, account in self.accounts.items():
+                    if nbaccount == account["account_num"]:
+                        account_name = acname
                         break
-                df[DICTBANK[bank]["amount"]] = pd.to_numeric(
-                    df[DICTBANK[bank]["amount"]]
+                df[catnames["amount"]] = pd.to_numeric(
+                    df[catnames["amount"]]
                     .replace(",", ".", regex=True)
                     .replace(r"\s", "", regex=True),
                     errors="coerce",
                 )
-                df[DICTBANK[bank]["date"]] = pd.to_datetime(df[DICTBANK[bank]["date"]])
                 # If account is not found
                 if account_name is None:
                     account_name = gui_instance.handle_unrecognized_account(
                         nbaccount, accdf
                     )
                     lastbalance = accdf.loc[accdf['date'].idxmax(), 'balance']
-                    initialbalance = lastbalance - df[DICTBANK[bank]["amount"]].sum()
+                    initialbalance = lastbalance - df[catnames["amount"]].sum()
                     initialop = pd.DataFrame(
                         {
-                            "date": [df[DICTBANK[bank]["date"]][0]],
+                            "date": [df[catnames["date"]].min()],
                             "name": "Initial balance for " + account_name,
                             "account": account_name,
                             "amount": round(initialbalance,2),
@@ -221,10 +233,10 @@ class BudgetManager:
                 # Build operations DataFrame
                 newdf = pd.DataFrame(
                     {
-                        "date": df[DICTBANK[bank]["date"]],
-                        "name": df[DICTBANK[bank]["name"]],
+                        "date": df[catnames["date"]],
+                        "name": df[catnames["name"]],
                         "account": account_name,
-                        "amount": df[DICTBANK[bank]["amount"]],
+                        "amount": df[catnames["amount"]],
                         "category": "NC",
                         "Mensuel": False,
                     }
@@ -252,7 +264,32 @@ class BudgetManager:
         if self.operations.empty:
             self.operations = newdf
         else:
+            account_operations = self.operations[self.operations["account"] == account_name]
+            if not account_operations.empty:
+                last_date = account_operations["date"].max()
+
+                # Filtrer par date
+                pre_filter_count = len(newdf)
+                newdf = newdf[newdf["date"] >= last_date]
+                ignored_operations += pre_filter_count - len(newdf)
+
+                # Filtrer par libellé et montant pour les opérations du même jour
+                existing_same_day = account_operations[account_operations["date"] == last_date]
+                pre_filter_count = len(newdf)
+                newdf = newdf[~(
+                    (newdf["date"] == last_date) &
+                    (newdf["name"].isin(existing_same_day["name"])) &
+                    (newdf["amount"].isin(existing_same_day["amount"]))
+                )]
+                ignored_operations += pre_filter_count - len(newdf)
+            added_operations = len(newdf)
             self.operations = pd.concat([self.operations, newdf], ignore_index=True)
+            messagebox.showinfo(
+                "Import Report",
+                f"Import complete:\n\n"
+                f"Operations added: {added_operations}\n"
+                f"Operations ignored: {ignored_operations}"
+            )
         gui_instance.update_all()
 
     def save_to_file(self):
@@ -383,21 +420,29 @@ class BudgetGUI:
         self.accounts_listbox.grid(row=1, column=0, sticky=tk.NSEW, padx=5, pady=5)
 
         # Menus déroulants pour année et mois
-        ttk.Label(frame, text="Year:").grid(row=4, column=0, padx=5, pady=5)
+        ttk.Label(frame, text="Year:").grid(row=2, column=0, padx=5, pady=5)
         self.year_var = tk.StringVar(value="All")
         self.year_menu = ttk.Combobox(
             frame, textvariable=self.year_var, state="readonly"
         )
-        self.year_menu.grid(row=5, column=0, padx=5, pady=5)
+        self.year_menu.grid(row=3, column=0, padx=5, pady=5)
         self.year_menu.bind("<<ComboboxSelected>>", self.update_month_menu)
 
-        ttk.Label(frame, text="Month:").grid(row=6, column=0, padx=5, pady=5)
+        ttk.Label(frame, text="Month:").grid(row=4, column=0, padx=5, pady=5)
         self.month_var = tk.StringVar(value="All")
         self.month_menu = ttk.Combobox(
             frame, textvariable=self.month_var, state="readonly"
         )
-        self.month_menu.grid(row=7, column=0, padx=5, pady=5)
+        self.month_menu.grid(row=5, column=0, padx=5, pady=5)
         self.month_menu.bind("<<ComboboxSelected>>", self.update_operations_table)
+
+        # Menu déroulant pour sélectionner un compte
+        ttk.Label(frame, text="Account:").grid(row=6, column=0, padx=5, pady=5)
+        self.account_var = tk.StringVar(value="All")
+        self.account_menu = ttk.Combobox(frame, textvariable=self.account_var, state="readonly")
+        self.account_menu["values"] = ["All"] + list(self.manager.accounts.keys())  # "All" pour ne pas filtrer
+        self.account_menu.grid(row=7, column=0, padx=5, pady=5)
+        self.account_menu.bind("<<ComboboxSelected>>", self.update_operations_table)
 
         # Boutons de gestion des opérations
         ttk.Button(frame, text="Add Category", command=self.add_category).grid(
@@ -406,7 +451,7 @@ class BudgetGUI:
 
         # Menu pour éditer des opérations réelles
         real_ops_frame = ttk.LabelFrame(frame, text="Operations")
-        real_ops_frame.grid(row=8, column=1, sticky=tk.EW, padx=5, pady=5)
+        real_ops_frame.grid(row=6, column=1, sticky=tk.EW, padx=5, pady=5)
 
         # Boutons Modifier et Supprimer sous la table des opérations
         ttk.Button(
@@ -456,14 +501,14 @@ class BudgetGUI:
             height=20,
         )
         self.operations_table.grid(
-            row=0, column=1, rowspan=8, sticky=tk.NSEW, padx=5, pady=5
+            row=0, column=1, rowspan=6, sticky=tk.NSEW, padx=5, pady=5
         )
         for col in self.operations_table["columns"]:
             self.operations_table.heading(col, text=col)
 
         # Menu pour ajouter des opérations virtuelles
         virtual_ops_frame = ttk.LabelFrame(frame, text="Add Virtual Operation")
-        virtual_ops_frame.grid(row=9, column=1, rowspan=2, sticky=tk.EW, padx=5, pady=5)
+        virtual_ops_frame.grid(row=7, column=1, rowspan=2, sticky=tk.EW, padx=5, pady=5)
 
         # Champ "From" (catégorie source)
         ttk.Label(virtual_ops_frame, text="From:").grid(row=0, column=0, padx=5, pady=5)
@@ -516,13 +561,13 @@ class BudgetGUI:
 
         # Tableau des catégories
         ttk.Label(frame, text="Category Summary:").grid(
-            row=11, column=1, rowspan=2, padx=5, pady=5, sticky=tk.W
+            row=9, column=1, rowspan=2, padx=5, pady=5, sticky=tk.W
         )
         self.category_summary_table = ttk.Treeview(
             frame, columns=self.manager.categories, show="headings", height=2
         )
         self.category_summary_table.grid(
-            row=12, column=1, rowspan=1, sticky=tk.NSEW, padx=5, pady=5
+            row=10, column=1, rowspan=3, sticky=tk.NSEW, padx=5, pady=5
         )
         for category in self.manager.categories:
             self.category_summary_table.heading(category, text=category)
@@ -599,9 +644,27 @@ class BudgetGUI:
 
             self.manager.add_categorization_rule(keyword, category)
             update_rules_list()
-            messagebox.showinfo(
-                "Success", f"Rule '{keyword} -> {category}' added successfully."
-            )
+        def edit_rule():
+            selected = rules_list.curselection()
+            if not selected:
+                messagebox.showerror("Error", "No rule selected.")
+                return
+            rule = rules_list.get(selected[0])
+            keyword, category = rule.split(" -> ")
+            keyword_var.set(keyword)
+            category_var.set(category)
+
+        def delete_rule():
+            selected = rules_list.curselection()
+            if not selected:
+                messagebox.showerror("Error", "No rule selected.")
+                return
+            rule = rules_list.get(selected[0])
+            keyword, _ = rule.split(" -> ")
+            del self.manager.categorization_rules[keyword]
+            self.manager.save_categorization_rules()
+            update_rules_list()
+            messagebox.showinfo("Success", f"Rule '{rule}' deleted successfully.")
 
         def update_rules_list():
             rules_list.delete(0, tk.END)
@@ -626,14 +689,18 @@ class BudgetGUI:
 
         ttk.Label(rules_window, text="Category:").grid(row=2, column=0, padx=10, pady=5)
         category_var = tk.StringVar()
-        ttk.Entry(rules_window, textvariable=category_var).grid(
-            row=2, column=1, padx=10, pady=5
-        )
+        category_menu = ttk.Combobox(rules_window, textvariable=category_var, state="readonly")
+        category_menu["values"] = self.manager.categories  # Populate with available categories
+        category_menu.grid(row=2, column=1, padx=10, pady=5)
 
         # Buttons
         ttk.Button(rules_window, text="Add Rule", command=add_rule).grid(
-            row=3, column=0, columnspan=2, pady=10
+            row=3, column=0, pady=10
         )
+        ttk.Button(rules_window, text="Edit Rule", command=edit_rule).grid(
+            row=3, column=1, padx=10, pady=10)
+        ttk.Button(rules_window, text="Delete Rule", command=delete_rule).grid(
+            row=3, column=2, padx=10, pady=10)
 
     def show_tooltip(self, widget, text):
         """
@@ -691,6 +758,13 @@ class BudgetGUI:
                 filtered_operations = filtered_operations[
                     filtered_operations["date"].dt.month == int(selected_month)
                 ]
+
+        # Filtrer par compte
+        selected_account = self.account_var.get()
+        if selected_account != "All":
+            filtered_operations = filtered_operations[
+                filtered_operations["account"] == selected_account
+            ]
 
         # Actualiser la table des opérations
         for row in self.operations_table.get_children():
@@ -891,11 +965,13 @@ class BudgetGUI:
         if not selected_item:
             messagebox.showerror("Error", "Please select an operation to edit.")
             return
-
         # Get index of the selected operation in the DataFrame
-        index = int(
-            self.operations_table.item(selected_item)["values"][0]
-        )  # Assume first column is the DataFrame index
+        values =  self.operations_table.item(selected_item)["values"]
+        index = self.manager.operations.index[(
+            self.manager.operations['date']==values[0]) & (
+                self.manager.operations['name']==values[1]) & (
+                    self.manager.operations['amount']==float(values[3]))][0]
+        
         operation = self.manager.operations.loc[index]
 
         def save_changes():
@@ -906,7 +982,7 @@ class BudgetGUI:
                 )
                 self.manager.operations.at[index, "name"] = entry_name.get()
                 self.manager.operations.at[index, "amount"] = float(entry_amount.get())
-                self.manager.operations.at[index, "category"] = entry_category.get()
+                self.manager.operations.at[index, "category"] = category_menu.get()
                 self.manager.operations.at[index, "Mensuel"] = bool(monthly_var.get())
 
                 self.update_operations_table()
@@ -936,14 +1012,15 @@ class BudgetGUI:
         entry_amount.insert(0, operation["amount"])
         entry_amount.grid(row=2, column=1, padx=5, pady=5)
 
-        ttk.Label(edit_window, text="Category:").grid(row=3, column=0, padx=5, pady=5)
-        entry_category = ttk.Entry(edit_window)
-        entry_category.insert(0, operation["category"])
-        entry_category.grid(row=3, column=1, padx=5, pady=5)
+        ttk.Label(edit_window, text="Category:").grid(row=4, column=0, padx=10, pady=5)
+        category_var = tk.StringVar(value=operation["category"])
+        category_menu = ttk.Combobox(edit_window, textvariable=category_var, state="readonly")
+        category_menu["values"] = self.manager.categories
+        category_menu.grid(row=4, column=1, padx=10, pady=5)
 
         monthly_var = tk.IntVar(value=int(operation["Mensuel"]))
         ttk.Checkbutton(edit_window, text="Monthly", variable=monthly_var).grid(
-            row=4, column=0, columnspan=2, padx=5, pady=5
+            row=5, column=0, columnspan=2, padx=5, pady=5
         )
 
         ttk.Button(edit_window, text="Save", command=save_changes).grid(
@@ -976,7 +1053,12 @@ class BudgetGUI:
 
             # Display operation details
             label_operation.config(
-                text=f"{operation['date']} | {operation['name']} | {operation['amount']} €"
+                text=f"{operation['account']} : {operation['date'].date()} "
+            )
+            
+            # Display operation details
+            label_operation2.config(
+                text=f"{operation['name']} | {operation['amount']} €"
             )
 
             # Set default category suggestion
@@ -1036,31 +1118,47 @@ class BudgetGUI:
 
         # Create window for categorization
         categorize_window = tk.Toplevel(self.root)
+        categorize_window.geometry('500x300')
         categorize_window.title("Categorize Operations")
 
         label_operation = ttk.Label(
-            categorize_window, text="", font=("Arial", 12), wraplength=400
+            categorize_window, text="", font=("Arial", 9), wraplength=500
         )
         label_operation.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+
+        label_operation2 = ttk.Label(
+            categorize_window, text="", font=("Arial", 9), wraplength=500
+        )
+        label_operation2.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
 
         category_var = tk.StringVar(
             value=self.manager.categories[0] if self.manager.categories else ""
         )
         ttk.Label(categorize_window, text="Category:").grid(
-            row=1, column=0, padx=10, pady=5
+            row=2, column=0, padx=10, pady=5
         )
         category_menu = tk.OptionMenu(
             categorize_window, category_var, *self.manager.categories
         )
-        category_menu.grid(row=1, column=1, padx=5, pady=5)
+        category_menu.grid(row=2, column=1, padx=5, pady=5)
 
         ttk.Button(categorize_window, text="Next", command=save_and_next).grid(
-            row=2, column=0, columnspan=2, pady=10
+            row=3, column=0, columnspan=2, pady=10
         )
         ttk.Button(
             categorize_window, text="Add Category", command=add_category_in_catop
-        ).grid(row=3, column=0, columnspan=2, pady=10)
+        ).grid(row=4, column=0, columnspan=1, pady=10)
+        ttk.Button(
+            categorize_window, text="Manage Rules", command=self.manage_categorization_rules
+        ).grid(row=4, column=1, columnspan=1, pady=10)
 
+
+        categorize_window.grid_rowconfigure(0, weight=1)
+        categorize_window.grid_rowconfigure(1, weight=1)
+        categorize_window.grid_rowconfigure(2, weight=1)
+        categorize_window.grid_rowconfigure(3, weight=1)
+        categorize_window.grid_columnconfigure(0, weight=1)
+        categorize_window.grid_columnconfigure(1, weight=1)
         # Show the first operation
         show_operation(0)
 
